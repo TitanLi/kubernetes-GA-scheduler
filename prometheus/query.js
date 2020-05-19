@@ -3,5 +3,6 @@ module.exports = {
     cluster: { ...require('./lib/cluster.js') },
     cpu: { ...require('./lib/cpu.js') },
     memory: { ...require('./lib/memory.js') },
-    bandwidth: { ...require('./lib/bandwidth.js') }
+    bandwidth: { ...require('./lib/bandwidth.js') },
+    pod: { ...require('./lib/pod.js') }
 }
