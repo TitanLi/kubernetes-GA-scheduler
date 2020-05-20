@@ -18,8 +18,13 @@
   "homepage": "https://github.com/TitanLi/kubernetes-scheduler-algorithm#readme",
   "dependencies": {
     "axios": "^0.19.2",
+    "body-parser": "^1.19.0",
     "colors": "^1.4.0",
+    "cors": "^2.8.5",
+    "express": "^4.17.1",
+    "joi": "^14.3.1",
     "kubernetes-client": "^9.0.0",
+    "path": "^0.12.7",
     "ssh2": "^0.8.9",
     "wol": "^1.0.7"
   }
