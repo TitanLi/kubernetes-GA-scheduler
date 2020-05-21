@@ -1,13 +1,23 @@
 const color = require('colors');
-const { strip } = require('../lib/num.js');
+const { strip } = require('./../lib/num.js');
 const { twoDimensionalArrayCopy, threeDimensionalArrayCopy, arrayCompare, arrayFilter, arrayFind, arraySum } = require('./../lib/array.js');
+const Migrate = require('./../../lib/migrate.js');
+const migrate = new Migrate();
 class GA {
-    constructor(compute, vnf, initPopulationSize) {
+    constructor(compute, vnf, initPopulationSize, currentPodPlacement, maybeTurnOffNodeNum = 0) {
         this.compute = [...Array(compute.length).keys()];
         this.computeResource = compute;
         this.vnf = [...Array(vnf.length).keys()].map((data) => data + 1);
         this.vnfUsaged = vnf;
         this.initPopulationSize = initPopulationSize;
+        this.currentPodPlacement = currentPodPlacement.splice(maybeTurnOffNodeNum, 1);
+        // 讓Pod編號方式與基因演算法相同從1開始編號
+        for (let i = 0; i < this.currentPodPlacement.length; i++) {
+            for (let j = 0; j < this.currentPodPlacement[i].length; j++) {
+                this.currentPodPlacement[i][j] = this.currentPodPlacement[i][j] + 1;
+            }
+        }
+        console.log(currentPodPlacement);
     }
 
     // 為染色體給予評分
@@ -29,15 +39,21 @@ class GA {
             }
             if (data[j].length > 0) {
                 // 計算CPU利用率
-                scoreCPU = strip(scoreCPU + strip(arraySum(nodeVnfUsageCPU) / this.computeResource[j - 1][0]));
+                // scoreCPU = strip(scoreCPU + strip(arraySum(nodeVnfUsageCPU) / this.computeResource[j - 1][0]));
+                scoreCPU = strip(scoreCPU + strip(this.computeResource[j - 1][0] - arraySum(nodeVnfUsageCPU)));
                 // 計算RAM利用率
-                scoreRAM = strip(scoreRAM + strip(arraySum(nodeVnfUsageRAM) / this.computeResource[j - 1][1]));
+                // scoreRAM = strip(scoreRAM + strip(arraySum(nodeVnfUsageRAM) / this.computeResource[j - 1][1]));
+                scoreRAM = strip(strip(scoreRAM + strip(this.computeResource[j - 1][1]) - arraySum(nodeVnfUsageRAM)) / 1073741820);
                 runNode = runNode + 1;
             }
         }
+        // 計算VNF遷移成本
+        let renew = twoDimensionalArrayCopy(data);
+        renew.shift();
+        let migrationCost = migrate.migrationCost(this.currentPodPlacement, renew).cost;
         // 使用結點數越少分數越高
-        usageRate = (this.compute.length - runNode) * 4;
-        ans = Number((scoreCPU + scoreRAM + usageRate).toFixed(2));
+        usageRate = runNode;
+        ans = Number((scoreCPU + scoreRAM + usageRate + migrationCost).toFixed(2));
         return ans;
     }
 
@@ -282,7 +298,7 @@ class GA {
                 if (copulationStatus) {
                     // 父親基因與前代基因選好的
                     let fatherGeneScore = this.geneScore(father);
-                    if (copulationData[peopleSelection1][0][0] <= fatherGeneScore) {
+                    if (fatherGeneScore <= copulationData[peopleSelection1][0][0]) {
                         father[0][0] = fatherGeneScore;
                         copulationData[peopleSelection1] = twoDimensionalArrayCopy(father);
                     } else {
@@ -290,7 +306,7 @@ class GA {
                     }
                     // 母親基因與前代基因選好的
                     let motherGeneScore = this.geneScore(mother);
-                    if (copulationData[peopleSelection2][0][0] <= motherGeneScore) {
+                    if (motherGeneScore <= copulationData[peopleSelection2][0][0]) {
                         mother[0][0] = motherGeneScore;
                         copulationData[peopleSelection2] = twoDimensionalArrayCopy(mother);
                     } else {

@@ -10,7 +10,7 @@ do
 	    NODES=($(kubectl --server $SERVER get nodes -o json | jq '.items[].metadata.name' | tr -d '"'))
 	    NUMNODES=${#NODES[@]}
         #CHOSEN=${NODES[$[$RANDOM % $NUMNODES]]}
-	    CHOSEN=$(curl "http://localhost:3000/scheduler/$PODNAME/")
+	    CHOSEN=$(curl "http://localhost:3000/scheduler/$NAMESPACES/$PODNAME")
 	    echo "$CHOSEN"
 	    curl --header "Content-Type:application/json" --request POST --data '{"apiVersion":"v1", "kind": "Binding", "metadata": {"name": "'$PODNAME'"}, "target": {"apiVersion": "v1", "kind": "Node", "name": "'$CHOSEN'"}}' http://$SERVER/api/v1/namespaces/$NAMESPACES/pods/$PODNAME/binding/
         echo "Assigned $PODNAME to $CHOSEN in NAMESPACES:$NAMESPACES"

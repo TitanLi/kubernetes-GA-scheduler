@@ -50,7 +50,7 @@ const arrayFilter = function (arr1, arr2) {
 
 // 在arr中找出是否包含元素
 const arrayFind = function (arr, data) {
-    console.log(arr);
+    // console.log(arr);
     let found = arr.find(element => element == data);
     return found == undefined ? false : true;
 }

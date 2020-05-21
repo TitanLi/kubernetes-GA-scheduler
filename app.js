@@ -2,9 +2,12 @@ const colors = require('colors');
 const DataCollectionNode = require('./lib/dataCollectionNode.js');
 const DataCollectionPod = require('./lib/dataCollectionPod.js');
 const { strip } = require('./genetic-algorithm/lib/num.js');
-const { arrayFind, twoDimensionalArrayCopy, threeDimensionalArraySortByFirstElement, twoDimensionalArraySortBySecondElement } = require('./genetic-algorithm/lib/array.js');
+const { arrayFind, twoDimensionalArrayCopy, threeDimensionalArrayCopy, threeDimensionalArraySortByFirstElement, twoDimensionalArraySortBySecondElement } = require('./genetic-algorithm/lib/array.js');
 const GA = require('./genetic-algorithm/v2/placement.js');
+// 使用基因演算法計算遷移VNF放置位置
+const initPopulationSize = 10;
 const Migrate = require('./lib/migrate.js');
+const migrate = new Migrate();
 const express = require('express');
 const path = require('path');
 const bodyParser = require('body-parser');
@@ -22,17 +25,21 @@ app.use(bodyParser.json());
 //     'Access-Control-Allow-Origin': '*'
 // }
 app.use(cors());
-let testNode = ['titan4', 'titan4', 'titan2', 'titan5', 'titan5', 'titan5'];
+// let testNode = ['titan4', 'titan4', 'titan2', 'titan5', 'titan5', 'titan5', 'titan2'];
+let testNode = ['titan5', 'titan5', 'titan5'];
 let count = 0;
 let migrateScheduler = {};
-app.get('/scheduler/:pod/', (req, res) => {
+app.get('/scheduler/:namespace/:pod', (req, res) => {
     let pod = req.params.pod;
+    let namespace = req.params.namespace;
     let deploymentList = Object.keys(migrateScheduler);
     let schedulerNode = '';
-    console.log(`Pod Name：${pod}`);
+    let searchKey = `${namespace}:${pod}`
+    console.log(`Search key：${searchKey}`);
     for (let i = 0; i < deploymentList.length; i++) {
-        if (pod.match(deploymentList[i])) {
+        if (searchKey.match(deploymentList[i])) {
             schedulerNode = migrateScheduler[deploymentList[i]].shift();
+            break;
         }
     }
     // count++;
@@ -116,7 +123,8 @@ async function main() {
         cpuUsagedRate = strip(cpuUsaged / workNodeResource[i][0]);
         let memoryUsagedRate = 0;
         memoryUsagedRate = strip(memoryUsaged / workNodeResource[i][1]);
-        if (cpuUsagedRate < 0.7) {
+        // console.log(`${workNodeName[i]} ${cpuUsagedRate}`);
+        if (cpuUsagedRate < 0.8) {
             if (workNodeName[i] == clusterControllerMaster || workNodeName[i] == clusterWorkNodeMaster) {
                 console.log(colors.green('pass'));
             } else {
@@ -128,9 +136,9 @@ async function main() {
     console.log(colors.red(`CPU資源利用率低於門檻節點：`));
     maybeTurnOffNode.sort(twoDimensionalArraySortBySecondElement)
     console.log(maybeTurnOffNode);
-    console.log(colors.red(`預計關閉節點${maybeTurnOffNode[0][0]}`));
     // 將欠載Node Pod進行遷移放置
     if (maybeTurnOffNode.length != 0) {
+        console.log(colors.red(`預計關閉節點${maybeTurnOffNode[0][0]}`));
         // 計算可用的Work Node剩餘資源
         let gaWorkNodeName = [];
         let gaWorkNodeResource = [];
@@ -171,13 +179,14 @@ async function main() {
         console.log(colors.red(`待處理VNF所需資源列表：`));
         console.log(gaVnfResource);
 
-        // 使用基因演算法計算遷移VNF放置位置
-        const initPopulationSize = 10;
-        let ga = new GA(gaWorkNodeResource, gaVnfResource, initPopulationSize);
+        let maybeTurnOffNodeNum = workNodeName.indexOf(maybeTurnOffNode[0][0]);
+        let ga = new GA(gaWorkNodeResource, gaVnfResource, initPopulationSize, twoDimensionalArrayCopy(placement), maybeTurnOffNodeNum);
         let copulationResult;
         // 產生初始化基因池
         let initPopulationResult = ga.initPopulation();
         if (initPopulationResult) {
+            console.log(colors.red(`可成功關閉${maybeTurnOffNode[0][0]}`));
+            console.log(colors.green(`開始遷移Pod`));
             let populationScore = ga.getScore(initPopulationResult);
             console.log('初始化基因');
             console.log(populationScore.sort(threeDimensionalArraySortByFirstElement));
@@ -207,7 +216,6 @@ async function main() {
             console.log(`mutation次數：${mutationSuccess}`);
             console.log(copulationResult.sort(threeDimensionalArraySortByFirstElement));
             // 遷移模組開始遷移Pod
-            const migrate = new Migrate();
             await migrate.setNodeNoSchedule(maybeTurnOffNode[0][0]);
             for (let i = 0; i < gaVnfName.length; i++) {
                 // let podNameSpace = await dataCollectionPod.getPodNameSpace(gaVnfName[i]);
@@ -228,13 +236,13 @@ async function main() {
                 console.log(podNameSpace);
                 console.log(gaVnfName[i]);
                 let vnfNum = gaVnfName.indexOf(gaVnfName[i]);
-                for (j = 1; j < copulationResult[9].length; j++) {
-                    if (arrayFind(copulationResult[9][j], (vnfNum + 1))) {
+                for (j = 1; j < copulationResult[0].length; j++) {
+                    if (arrayFind(copulationResult[0][j], (vnfNum + 1))) {
                         console.log('find');
-                        if (migrateScheduler[deploymentName]) {
-                            migrateScheduler[deploymentName].push(gaWorkNodeName[j - 1]);
+                        if (migrateScheduler[`${podNameSpace}:${deploymentName}`]) {
+                            migrateScheduler[`${podNameSpace}:${deploymentName}`].push(gaWorkNodeName[j - 1]);
                         } else {
-                            migrateScheduler[deploymentName] = [gaWorkNodeName[j - 1]];
+                            migrateScheduler[`${podNameSpace}:${deploymentName}`] = [gaWorkNodeName[j - 1]];
                         }
                         break;
                     }
@@ -247,13 +255,11 @@ async function main() {
                 // });
             }
         } else {
-            console.log(colors.red('基因演算法放置失敗無法將待處理VNF成功遷移'));
+            console.log(colors.red('基因演算法放置失敗無法將預計遷移VNF成功遷移'));
             console.log(colors.green('因此嘗試將所有VNF重新放置，看是否能夠關閉節點'));
-            // 嘗試使用基因演算法重新放置全部
-            const initPopulationSize = 10;
             let gaWorkNodeResource = twoDimensionalArrayCopy(workNodeResource);
             let gaVnfResource = twoDimensionalArrayCopy(vnfRequestList);
-            ga = new GA(gaWorkNodeResource, gaVnfResource, initPopulationSize);
+            let ga = new GA(gaWorkNodeResource, gaVnfResource, initPopulationSize, twoDimensionalArrayCopy(placement));
             // 產生初始化基因池
             let initPopulationResult = ga.initPopulation();
             if (initPopulationResult) {
@@ -288,15 +294,67 @@ async function main() {
             }
             // 判斷執行中的Node數是否減少
             let countRunNode = 0
-            for (let i = 0; i < copulationResult[9].length; i++) {
-                if (copulationResult[9][i].length != 0) {
+            for (let i = 1; i < copulationResult[0].length; i++) {
+                if (copulationResult[0][i].length != 0) {
                     countRunNode++;
                 }
             }
             if (countRunNode >= workNodeName.length) {
                 console.log(colors.red('VNF放置需求無法將資源利用率低的Node關閉，維持原狀'));
             } else {
-
+                // Method 3
+                console.log(colors.red(`將所有VNF從新安排後可成功關閉節點`));
+                // 取得預計遷移的VNF編號
+                let current = twoDimensionalArrayCopy(placement);
+                // 讓Pod編號方式與基因演算法相同從1開始編號
+                for (let i = 0; i < current.length; i++) {
+                    for (let j = 0; j < current[i].length; j++) {
+                        current[i][j] = current[i][j] + 1;
+                    }
+                }
+                let renew = twoDimensionalArrayCopy(copulationResult[0]);
+                renew.shift();
+                let migrationCost = migrate.migrationCost(current, renew);
+                console.log(colors.red(`預計遷移的VNF編號${migrationCost.vnfNum}`));
+                let vnfNumList = migrationCost.vnfNum;
+                let turnOffNode = []
+                for (let i = 0; i < renew.length; i++) {
+                    if (renew[i].length == 0) {
+                        turnOffNode.push(workNodeName[i]);
+                    }
+                }
+                for (let i = 0; i < turnOffNode.length; i++) {
+                    migrate.setNodeNoSchedule(turnOffNode[i]);
+                }
+                // 依照VNF編號找尋目標放置Node
+                for (let i = 0; i < vnfNumList.length; i++) {
+                    let podMigrationTargetNodeNum = migrate.getMigrationTargetNode(renew, vnfNumList[i]);
+                    let podName = vnfList[vnfNumList[i] - 1];
+                    let deploymentName = '';
+                    let podNameSpace = '';
+                    let podList = [];
+                    for (let j = 0; j < reqDeploymentList.length; j++) {
+                        podList = reqDeploymentList[j].pod;
+                        for (let a = 0; a < podList.length; a++) {
+                            if (podList[a].name == podName) {
+                                deploymentName = reqDeploymentList[j].name;
+                                podNameSpace = reqDeploymentList[j].namespace;
+                                break;
+                            }
+                        }
+                    }
+                    console.log(colors.green(`遷移的Pod名稱${podName}`));
+                    console.log(colors.green(`屬於的Deployment：${deploymentName}`));
+                    console.log(colors.green(`屬於的NameSpace：${podNameSpace}`));
+                    console.log(colors.green(`預計放置目標節點：${workNodeName[podMigrationTargetNodeNum]}`))
+                    if (migrateScheduler[`${podNameSpace}:${deploymentName}`]) {
+                        migrateScheduler[`${podNameSpace}:${deploymentName}`].push(workNodeName[podMigrationTargetNodeNum]);
+                    } else {
+                        migrateScheduler[`${podNameSpace}:${deploymentName}`] = [workNodeName[podMigrationTargetNodeNum]];
+                    }
+                    console.log(migrateScheduler[`${podNameSpace}:${deploymentName}`]);
+                    await migrate.deletePod(podNameSpace, podName);
+                }
             }
         }
     }
