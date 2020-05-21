@@ -17,7 +17,6 @@ class GA {
                 this.currentPodPlacement[i][j] = this.currentPodPlacement[i][j] + 1;
             }
         }
-        console.log(currentPodPlacement);
     }
 
     // 為染色體給予評分

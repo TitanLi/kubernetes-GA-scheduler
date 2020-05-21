@@ -25,8 +25,8 @@ app.use(bodyParser.json());
 //     'Access-Control-Allow-Origin': '*'
 // }
 app.use(cors());
-// let testNode = ['titan4', 'titan4', 'titan2', 'titan5', 'titan5', 'titan5', 'titan2'];
-let testNode = ['titan5', 'titan5', 'titan5'];
+let testNode = ['titan4', 'titan4', 'titan2', 'titan2', 'titan5', 'titan5'];
+// let testNode = ['titan5', 'titan5', 'titan5'];
 let count = 0;
 let migrateScheduler = {};
 app.get('/scheduler/:namespace/:pod', (req, res) => {
@@ -185,6 +185,7 @@ async function main() {
         // 產生初始化基因池
         let initPopulationResult = ga.initPopulation();
         if (initPopulationResult) {
+            // Method 1
             console.log(colors.red(`可成功關閉${maybeTurnOffNode[0][0]}`));
             console.log(colors.green(`開始遷移Pod`));
             let populationScore = ga.getScore(initPopulationResult);
@@ -300,6 +301,7 @@ async function main() {
                 }
             }
             if (countRunNode >= workNodeName.length) {
+                // Method 2
                 console.log(colors.red('VNF放置需求無法將資源利用率低的Node關閉，維持原狀'));
             } else {
                 // Method 3
