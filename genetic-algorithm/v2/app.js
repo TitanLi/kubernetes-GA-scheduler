@@ -3,12 +3,15 @@ const { threeDimensionalArraySortByFirstElement, arrayFind } = require('../lib/a
 const Placement = require('./placement.js');
 
 class GA {
-    constructor(initPopulationSize) {
+    constructor(initPopulationSize, clusterWorkNodeMaster, gaWorkNodeName) {
         // this.deploymentList = deploymentList;
         this.initPopulationSize = initPopulationSize;
+        this.clusterWorkNodeMaster = clusterWorkNodeMaster;
+        this.gaWorkNodeName = gaWorkNodeName;
+        this.clusterWorkNodeMasterNum = gaWorkNodeName.indexOf(clusterWorkNodeMaster);
     }
     copulation(workNodeResource, vnfNameList, vnfRequestsResource, currentPodPlacement = [[]], maybeTurnOffNodeNum = 0) {
-        let ga = new Placement(workNodeResource, vnfRequestsResource, this.initPopulationSize, currentPodPlacement, maybeTurnOffNodeNum);
+        let ga = new Placement(this.clusterWorkNodeMasterNum, workNodeResource, vnfRequestsResource, this.initPopulationSize, currentPodPlacement, maybeTurnOffNodeNum);
         // 產生初始化基因池
         let initPopulationResult = ga.initPopulation();
         if (initPopulationResult) {

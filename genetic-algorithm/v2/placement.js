@@ -4,7 +4,8 @@ const { twoDimensionalArrayCopy, threeDimensionalArrayCopy, arrayCompare, arrayF
 const Migrate = require('./../../lib/migrate.js');
 const migrate = new Migrate();
 class GA {
-    constructor(compute, vnf, initPopulationSize, currentPodPlacement, maybeTurnOffNodeNum = 0) {
+    constructor(clusterWorkNodeMasterNum, compute, vnf, initPopulationSize, currentPodPlacement, maybeTurnOffNodeNum = 0) {
+        this.clusterWorkNodeMasterNum = clusterWorkNodeMasterNum;
         this.compute = [...Array(compute.length).keys()];
         this.computeResource = compute;
         this.vnf = [...Array(vnf.length).keys()].map((data) => data + 1);
@@ -12,11 +13,11 @@ class GA {
         this.initPopulationSize = initPopulationSize;
         this.currentPodPlacement = currentPodPlacement.splice(maybeTurnOffNodeNum, 1);
         // 讓Pod編號方式與基因演算法相同從1開始編號
-        for (let i = 0; i < this.currentPodPlacement.length; i++) {
-            for (let j = 0; j < this.currentPodPlacement[i].length; j++) {
-                this.currentPodPlacement[i][j] = this.currentPodPlacement[i][j] + 1;
-            }
-        }
+        // for (let i = 0; i < this.currentPodPlacement.length; i++) {
+        //     for (let j = 0; j < this.currentPodPlacement[i].length; j++) {
+        //         this.currentPodPlacement[i][j] = this.currentPodPlacement[i][j] + 1;
+        //     }
+        // }
     }
 
     // 為染色體給予評分
@@ -27,6 +28,7 @@ class GA {
         let runNode = 0;
         let usageRate = 0;
         let ans = 0;
+        let workNodeMasterScore = 0;
         for (let j = 1; j <= this.compute.length; j++) {
             let node = data[j];
             // 暫存單個Node上VNF的CPU和RAM用量
@@ -45,6 +47,9 @@ class GA {
                 scoreRAM = strip(strip(scoreRAM + strip(this.computeResource[j - 1][1]) - arraySum(nodeVnfUsageRAM)) / 1073741820);
                 runNode = runNode + 1;
             }
+            if ((j == this.clusterWorkNodeMasterNum + 1) && (node.length == 0)) {
+                workNodeMasterScore = 100;
+            }
         }
         // 計算VNF遷移成本
         let renew = twoDimensionalArrayCopy(data);
@@ -52,7 +57,7 @@ class GA {
         let migrationCost = migrate.migrationCost(this.currentPodPlacement, renew).cost;
         // 使用結點數越少分數越高
         usageRate = runNode;
-        ans = Number((scoreCPU + scoreRAM + usageRate + migrationCost).toFixed(2));
+        ans = Number((scoreCPU + scoreRAM + usageRate + migrationCost + workNodeMasterScore).toFixed(2));
         return ans;
     }
 
