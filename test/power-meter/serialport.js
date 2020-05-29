@@ -1,41 +1,54 @@
 const SerialPort = require("serialport");
-const dotenv = require('dotenv').load();
+const Readline = SerialPort.parsers.Readline
+const dotenv = require('dotenv').config();
 const mongodb = require('mongodb').MongoClient;
 let db;
-mongodb.connect(process.env.MONGODB, (err, client) => {
-    db = client.db("paper");
-    console.log("connect mongodb on 27017 port");
+mongodb.connect(process.env.MONGODB,{ useUnifiedTopology: true }, (err, client) => {
+  db = client.db("paper");
+  console.log("connect mongodb on 27017 port");
+  connect();
 });
-function connect(){
-	port = new SerialPort(process.env.serialport, { 
-    	  parser: SerialPort.parsers.readline('\n'),
-          autoOpen:true
-	},(err)=>{
-           if(err){
-             setTimeout(()=>{
-               connect();
-             },1000);
-           }
-        });
-        port.on('open', function() {
-          console.log("arduino connect");
-          let collection = localDB.collection('power-test1');
-          port.on('data', function(data) {
-            let currentData = JSON.parse(data);
-            console.log(currentData)
-            collection.insert({
-                'current':currentData.current,
-                'time': new Date()
-            }, (err, data) => {
-                if(!err){
-                    console.log(`data ${currentData.current} insert successfully`);
-                }
-            });
-          });
-        });
 
-        port.on('close', function (err) {
-           console.log('close');                                                                                                                                connect();
-        });
+const strip = function (num, precision = 10) {
+  return Number(num.toFixed(precision));
 }
-connect();
+
+const connect = () => {
+  const port = new SerialPort(process.env.serialport, { autoOpen: true }, (err) => {
+    console.log(err);
+    if (err) {
+      setTimeout(() => {
+        connect();
+      }, 1000);
+    }
+  });
+  const parser = new Readline()
+  port.pipe(parser)
+  port.on('open', function () {
+    console.log("arduino connect");
+    let collection = db.collection('powerTest1');
+    parser.on('data', function (data) {
+      try {
+        let currentData = JSON.parse(data.toString());
+        console.log(currentData);
+        let current = strip(strip(Number(currentData.data1) + Number(currentData.data2)) / 2);
+        collection.insertOne({
+          'current': current,
+          'time': new Date()
+        }, (err, data) => {
+          if (!err) {
+            console.log(`data ${current} insert successfully`);
+          }
+        });
+      } catch (error) {
+        console.log(data.toString());
+        console.log('JSON parse error');
+      }
+    });
+  });
+
+  port.on('close', function (err) {
+    console.log('close');
+    connect();
+  });
+}
