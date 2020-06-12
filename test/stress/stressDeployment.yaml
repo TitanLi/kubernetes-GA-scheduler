@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stress-deployment
+spec:
+  selector:
+    matchLabels:
+      app: stress-deployment
+  replicas: 7
+  template:
+    metadata:
+      labels:
+        app: stress-deployment
+    spec:
+      schedulerName: my-scheduler
+      containers:
+      - name: stress-demo-cpu
+        image: polinux/stress
+        resources:
+          limits:
+            cpu: "1"
+            memory: "200Mi"
+          requests:
+            cpu: "1"
+            memory: "100Mi"
+        command: ["stress"]
+        args: ["--cpu",  "1", "--timeout", "200000"]

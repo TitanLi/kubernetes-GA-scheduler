@@ -12,7 +12,7 @@ mongodb.connect(process.env.MONGODB,{ useUnifiedTopology: true }, (err, client) 
 const strip = function (num, precision = 10) {
   return Number(num.toFixed(precision));
 }
-
+let count = 0;
 const connect = () => {
   const port = new SerialPort(process.env.serialport, { autoOpen: true }, (err) => {
     console.log(err);
@@ -49,6 +49,12 @@ const connect = () => {
 
   port.on('close', function (err) {
     console.log('close');
-    connect();
+    // connect();
   });
+  setInterval(() => {
+    count ++;
+    if(count == 600){
+      port.end();
+    }
+  }, 1000);
 }

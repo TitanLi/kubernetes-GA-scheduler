@@ -44,11 +44,11 @@ class GA {
                 scoreCPU = strip(scoreCPU + strip(this.computeResource[j - 1][0] - arraySum(nodeVnfUsageCPU)));
                 // 計算RAM利用率
                 // scoreRAM = strip(scoreRAM + strip(arraySum(nodeVnfUsageRAM) / this.computeResource[j - 1][1]));
-                scoreRAM = strip(strip(scoreRAM + strip(this.computeResource[j - 1][1]) - arraySum(nodeVnfUsageRAM)) / 1073741820);
+                scoreRAM = strip(scoreRAM + Math.floor(strip(strip(this.computeResource[j - 1][1] - arraySum(nodeVnfUsageRAM)) / 1073741820)));
                 runNode = runNode + 1;
             }
             if ((j == this.clusterWorkNodeMasterNum + 1) && (node.length == 0)) {
-                workNodeMasterScore = 100;
+                workNodeMasterScore = strip(this.computeResource[j - 1][0] + Math.floor(strip(this.computeResource[j - 1][1] / 1073741820)));
             }
         }
         // 計算VNF遷移成本
