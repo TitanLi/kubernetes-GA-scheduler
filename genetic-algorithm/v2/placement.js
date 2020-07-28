@@ -27,6 +27,7 @@ class GA {
         let scoreRAM = 0;
         let runNode = 0;
         let usageRate = 0;
+        let energy = 0
         let ans = 0;
         let workNodeMasterScore = 0;
         for (let j = 1; j <= this.compute.length; j++) {
@@ -46,6 +47,11 @@ class GA {
                 // scoreRAM = strip(scoreRAM + strip(arraySum(nodeVnfUsageRAM) / this.computeResource[j - 1][1]));
                 scoreRAM = strip(scoreRAM + Math.floor(strip(strip(this.computeResource[j - 1][1] - arraySum(nodeVnfUsageRAM)) / 1073741820)));
                 runNode = runNode + 1;
+                if (arraySum(nodeVnfUsageCPU) >= 4) {
+                    energy = strip(energy + 0.9);
+                } else {
+                    energy = strip(energy + (0.388 + (arraySum(nodeVnfUsageCPU) / 4) * 0.512));
+                }
             }
             if ((j == this.clusterWorkNodeMasterNum + 1) && (node.length == 0)) {
                 workNodeMasterScore = strip(this.computeResource[j - 1][0] + Math.floor(strip(this.computeResource[j - 1][1] / 1073741820)));
@@ -57,7 +63,7 @@ class GA {
         let migrationCost = migrate.migrationCost(this.currentPodPlacement, renew).cost;
         // 使用結點數越少分數越高
         usageRate = runNode;
-        ans = Number((scoreCPU + scoreRAM + usageRate + migrationCost + workNodeMasterScore).toFixed(2));
+        ans = Number((scoreCPU + scoreRAM + usageRate + migrationCost + workNodeMasterScore + energy).toFixed(2));
         return ans;
     }
 

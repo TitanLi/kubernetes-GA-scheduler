@@ -120,7 +120,7 @@ app.get('/scheduler/:namespace/:pod', (req, res) => {
                 // if (vnfCount >= 35) {
                 //     console.timeEnd("codeRunTime");
                 // }
-                console.log(`${timerCount} s`);
+                // console.log(`${timerCount} s`);
                 vnfCount++;
                 res.send(schedulerNode);
             } else {
@@ -225,12 +225,12 @@ async function main() {
         maybeTurnOffNode.sort(twoDimensionalArraySortBySecondElement)
         console.log(maybeTurnOffNode);
         // 將欠載Node Pod進行遷移放置
-        // if (maybeTurnOffNode.length != 0 && pendingVnfNameList.length == 0) {
-        if (maybeTurnOffNode.length != 0) {
+        if (maybeTurnOffNode.length != 0 && pendingVnfNameList.length == 0) {
+        // if (maybeTurnOffNode.length != 0) {
             let turnOffNodeName = maybeTurnOffNode[0][0];
             console.log(colors.red(`預計關閉節點${turnOffNodeName}`));
             console.log(colors.red(`Scale In機制觸發`));
-            console.log(colors.green(`花費${timerCount} s`));
+            // console.log(colors.green(`花費${timerCount} s`));
             let deploymentList = Object.keys(migrateScheduler);
             let scaleInStatus = true;
             for (let i = 0; i < deploymentList.length; i++) {
@@ -282,7 +282,7 @@ async function main() {
                     await migrate.setMigrateScheduler(initPopulationResult, vnfNumList, gaVnfName);
                     console.log(colors.green(`遷移安排完成`));
                     let shutDownNodeStatus = await deleteNode(turnOffNodeName, reqDeploymentList, vnfNumList, gaVnfName);
-                    console.log(colors.red(`關閉${turnOffNodeName} 狀態：${shutDownNodeStatus} 花費：${timerCount} s`));
+                    // console.log(colors.red(`關閉${turnOffNodeName} 狀態：${shutDownNodeStatus} 花費：${timerCount} s`));
                 } else {
                     // 暫時關閉
                     console.log(colors.red('基因演算法放置失敗無法將預計遷移VNF成功遷移'));
@@ -569,8 +569,8 @@ async function scheduler() {
                     }
                     openNodeStatus = await Promise.all(preparationNodeList);
                     // 暫時關閉
-                    console.log(colors.red(`openNodeStatus`));
-                    console.log(colors.red(openNodeStatus));
+                    // console.log(colors.red(`openNodeStatus`));
+                    // console.log(colors.red(openNodeStatus));
                     // 取得預計遷移的VNF編號
                     let current = twoDimensionalArrayCopy(placement);
                     // 讓Pod編號方式與基因演算法相同從1開始編號
@@ -610,7 +610,7 @@ const openNode = async (node) => {
     // 機器啟動成功
     if (pingStatus) {
         console.log(colors.red(`${node}啟動成功`));
-        console.log(colors.green(`花費${timerCount} s`));
+        // console.log(colors.green(`花費${timerCount} s`));
         // 加入Node進入叢集
         await timer.sleep(1000);
         let addNodeToClusterStatus = await autoScale.addNodeToCluster(node)
@@ -630,7 +630,7 @@ const openNode = async (node) => {
                 time++;
             }
             console.log(colors.red(`${node}初始化完成`));
-            console.log(colors.green(`花費${timerCount} s`));
+            // console.log(colors.green(`花費${timerCount} s`));
         }
     }
 }
