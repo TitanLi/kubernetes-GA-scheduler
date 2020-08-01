@@ -1,9 +1,9 @@
 const axios = require('axios');
 const colors = require('colors');
-const prom = require('../prometheus/query.js');
-const { twoDimensionalArrayCopy } = require('./../genetic-algorithm/lib/array.js');
-const { strip } = require('./../genetic-algorithm/lib/num.js');
-const Client = require('./../node_modules/kubernetes-client').Client
+const prom = require('./prometheus/query.js');
+const { twoDimensionalArrayCopy } = require('./genetic-algorithm/lib/array.js');
+const { strip } = require('./genetic-algorithm/lib/num.js');
+const Client = require('./../../node_modules/kubernetes-client').Client
 
 class dataCollectionNode {
     constructor() {
