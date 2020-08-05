@@ -107,10 +107,8 @@ class dataCollectionNode {
             let cpuUsaged = 0;
             let memoryUsaged = 0;
             if (this.workNodeName[i] == clusterControllerMaster) {
-                // 暫時關閉
                 console.log(colors.green('可放置Pod節點：Cluster Controller Master pass'));
             } else if (maybeTurnOffNode == this.workNodeName[i]) {
-                // 暫時關閉
                 console.log(colors.green(`可放置Pod節點為預計關閉節點：${this.workNodeName[i]} pass`));
             } else {
                 for (let j = 0; j < this.placement[i].length; j++) {

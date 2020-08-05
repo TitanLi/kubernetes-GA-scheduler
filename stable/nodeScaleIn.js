@@ -168,7 +168,13 @@ async function main() {
                 let copulationPopulationResult = ga.copulation(gaWorkNodeResource, gaVnfName, gaVnfResource, twoDimensionalArrayCopy(placement), maybeTurnOffNodeNum);
                 // 有Worker Node資源利用率低於門檻值，且該節點可以順利關閉
                 if (copulationPopulationResult) {
-                    console.log(colors.red(`可成功關閉${turnOffNodeName}`));
+                    await new Promise((resolve, reject) => {
+                        console.log(colors.red(`可成功關閉${turnOffNodeName}`));
+                        console.log(colors.yellow(`將${turnOffNodeName}加入Redis turnOffNodeName`));
+                        redisClient.rpush("turnOffNodeName", turnOffNodeName, (err, value) => {
+                            resolve(value);
+                        });
+                    });
                     console.log(colors.green(`開始遷移Pod`));
                     // 遷移模組開始遷移Pod
                     const migrate = new Migrate(deploymentList, gaWorkNodeName, gaVnfName, migrateScheduler, inProcessTasks, deletePodNameList);
@@ -183,6 +189,12 @@ async function main() {
                     // 關閉Worker Node
                     let shutDownNodeStatus = await deleteNode(turnOffNodeName, deploymentList, vnfNumList, gaVnfName);
                     console.log(colors.red(`關閉${turnOffNodeName} 狀態：${shutDownNodeStatus}`));
+                    await new Promise((resolve, reject) => {
+                        console.log(colors.yellow(`將${turnOffNodeName}從Redis turnOffNodeName刪除`));
+                        redisClient.lrem("turnOffNodeName", -1, turnOffNodeName, (err, value) => {
+                            resolve(value);
+                        });
+                    });
                 } else {
                     // 有Worker Node資源利用率低於門檻值，但該節點無法關閉，嘗試全局優化
                     console.log(colors.red('基因演算法放置失敗無法將預計遷移VNF成功遷移'));
@@ -234,11 +246,23 @@ async function main() {
                             console.log(colors.green(`遷移資料準備完成`));
                             for (let i = 0; i < turnOffNode.length; i++) {
                                 // 將預計關閉的Node設為NoSchedule
-                                console.log(colors.red(`預計關閉${turnOffNode[i]}`));
+                                await new Promise((resolve, reject) => {
+                                    console.log(colors.red(`預計關閉${turnOffNode[i]}`));
+                                    console.log(colors.yellow(`將${turnOffNode[i]}加入Redis turnOffNodeName`));
+                                    redisClient.rpush("turnOffNodeName", turnOffNode[i], (err, value) => {
+                                        resolve(value);
+                                    });
+                                });
                                 await migrate.setNodeNoSchedule(turnOffNode[i]);
                                 // 刪除Node
                                 let shutDownNodeStatus = await deleteNode(turnOffNode[i], deploymentList, vnfNumList, gaVnfName);
                                 console.log(colors.red(`關閉${turnOffNode[i]}狀態：${shutDownNodeStatus}`));
+                                await new Promise((resolve, reject) => {
+                                    console.log(colors.yellow(`將${turnOffNode[i]}從Redis turnOffNodeName刪除`));
+                                    redisClient.lrem("turnOffNodeName", -1, turnOffNode[i], (err, value) => {
+                                        resolve(value);
+                                    });
+                                });
                                 break;
                             }
                         }
