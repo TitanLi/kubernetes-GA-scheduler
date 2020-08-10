@@ -12,7 +12,7 @@ const initPopulationSize = 10;
 const Migrate = require('./lib/migrate.js');
 const inProcessTasks = [];
 const clusterControllerMaster = 'titan1';
-const clusterWorkNodeMaster = 'titan4';
+const clusterMasterWorkNode = 'titan4';
 // const clusterWorkNodeList = ['titan4', 'titan2', 'titan3', 'titan5', 'titan6'];
 const clusterWorkNodeList = ['titan4', 'titan2', 'titan3', 'titan5'];
 const clusterWorkNodeResource = {
@@ -122,6 +122,7 @@ app.get('/scheduler/:namespace/:pod', (req, res) => {
 app.listen(3000);
 
 const deleteInProcessTasks = (data) => {
+    // 等待10秒後將任務從inProcessTasks列表中移除
     setTimeout(() => {
         console.log(colors.green(`移除${data}`));
         inProcessTasks.remove(data);
@@ -211,8 +212,8 @@ async function nodeScaleIn() {
             let nodeResourceCPU = workNodeResource[nodeNum][0];
             cpuUsagedRate = strip(strip(nodeResourceCPU - cpuAvailableResources) / nodeResourceCPU);
             if (cpuUsagedRate < 0.8) {
-                if (nodeName == clusterControllerMaster || nodeName == clusterWorkNodeMaster) {
-                    console.log(colors.green('資源利用率不足的節點為clusterControllerMaster或clusterWorkNodeMaster不可關閉pass'));
+                if (nodeName == clusterControllerMaster || nodeName == clusterMasterWorkNode) {
+                    console.log(colors.green('資源利用率不足的節點為clusterControllerMaster或clusterMasterWorkNode不可關閉pass'));
                 } else {
                     let maybeTurnOffNodeUsagedRate = strip(cpuUsagedRate + memoryUsagedRate);
                     maybeTurnOffNode.push([nodeName, maybeTurnOffNodeUsagedRate]);
@@ -262,7 +263,7 @@ async function nodeScaleIn() {
                 }
                 console.log(colors.red(`預計遷移VNF列表：`));
                 console.log(gaVnfName);
-                let ga = new GA(initPopulationSize, clusterWorkNodeMaster, gaWorkNodeName);
+                let ga = new GA(initPopulationSize, clusterMasterWorkNode, gaWorkNodeName);
                 // 產生初始化基因池
                 let initPopulationResult = ga.copulation(gaWorkNodeResource, gaVnfName, gaVnfResource, twoDimensionalArrayCopy(placement), maybeTurnOffNodeNum);
                 if (initPopulationResult) {
@@ -286,7 +287,7 @@ async function nodeScaleIn() {
                     let gaWorkNodeResource = twoDimensionalArrayCopy(workNodeResource);
                     let gaVnfName = twoDimensionalArrayCopy(vnfNameList);
                     let gaVnfResource = twoDimensionalArrayCopy(vnfRequestList);
-                    let ga = new GA(initPopulationSize, clusterWorkNodeMaster, gaWorkNodeName);
+                    let ga = new GA(initPopulationSize, clusterMasterWorkNode, gaWorkNodeName);
                     // 產生初始化基因池
                     let initPopulationResult = ga.copulation(gaWorkNodeResource, gaVnfName, gaVnfResource, twoDimensionalArrayCopy(placement));
                     // 判斷執行中的Node數是否減少
@@ -502,7 +503,7 @@ async function scheduler() {
         // console.log(colors.red(`可用運算節點資源列表：`));
         // console.log(gaWorkNodeResource);
         // 產生初始化基因池
-        let ga = new GA(initPopulationSize, clusterWorkNodeMaster, gaWorkNodeName);
+        let ga = new GA(initPopulationSize, clusterMasterWorkNode, gaWorkNodeName);
         let initPopulationResult = ga.copulation(gaWorkNodeResource, pendingVnfNameList, pendingVnfRequestList, twoDimensionalArrayCopy(placement));
         if (initPopulationResult) {
             // 一般scheduler 
@@ -558,7 +559,7 @@ async function scheduler() {
                 gaVnfName = gaVnfName.concat(pendingVnfNameList);
                 let gaVnfResource = twoDimensionalArrayCopy(vnfRequestList);
                 gaVnfResource = gaVnfResource.concat(pendingVnfRequestList);
-                let ga = new GA(initPopulationSize, clusterWorkNodeMaster, gaWorkNodeName);
+                let ga = new GA(initPopulationSize, clusterMasterWorkNode, gaWorkNodeName);
                 // 產生初始化基因池
                 let initPopulationResult = ga.copulation(gaWorkNodeResource, gaVnfName, gaVnfResource, twoDimensionalArrayCopy(placement));
                 // 經過Worker Node Scale Out後可成功放入該VNF
@@ -569,7 +570,7 @@ async function scheduler() {
                     for (let i = 1; i <= gaWorkNodeName.length; i++) {
                         if (initPopulationResult[0][i].length != 0) {
                             let node = gaWorkNodeName[i - 1];
-                            if (node != clusterWorkNodeMaster) {
+                            if (node != clusterMasterWorkNode) {
                                 preparationNodeList.push(openNode(node));
                                 console.log(colors.red(`預備開啟${node}`));
                             }
