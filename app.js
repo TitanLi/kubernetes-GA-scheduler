@@ -6,11 +6,10 @@ const AutoScale = require('./lib/autoScale.js');
 const autoScale = new AutoScale();
 const { strip } = require('./genetic-algorithm/lib/num.js');
 const { arrayFind, arrayFilter, twoDimensionalArrayCopy, twoDimensionalArraySortBySecondElement } = require('./genetic-algorithm/lib/array.js');
-// const GA = require('./genetic-algorithm/v2/placement.js');
 // 使用基因演算法計算遷移VNF放置位置
 const initPopulationSize = 10;
 const Migrate = require('./lib/migrate.js');
-const inProcessTasks = [];
+const GA = require('./genetic-algorithm/v2/app.js');
 const clusterControllerMaster = 'titan1';
 const clusterMasterWorkNode = 'titan4';
 // const clusterWorkNodeList = ['titan4', 'titan2', 'titan3', 'titan5', 'titan6'];
@@ -45,7 +44,6 @@ const clusterWorkNodeMAC = {
 }
 // 'titan6': 'a0:d3:c1:0b:2d:81'
 
-const GA = require('./genetic-algorithm/v2/app.js');
 const express = require('express');
 const path = require('path');
 const bodyParser = require('body-parser');
@@ -64,20 +62,44 @@ app.use(bodyParser.json());
 // }
 app.use(cors());
 let deletingWorkerNode = '';
+// 工作節點飽和度讓Work Node CPU能力減1
+const workNodeSaturation = 1;
+// Worker Node開機狀態
+let openNodeStatus = true;
+// 已被調度安排的VNF(Deployment)
 let migrateScheduler = {};
+// 預計遷移刪除的Pod
 let deletePodNameList = [];
-var openNodeStatus = true;
-let timerCount = 1;
-setInterval(() => {
-    timerCount++;
-}, 1000);
+// 紀錄處理中的Deployment
+let inProcessTasks = [];
+// 資源利用率門檻
+const vCpuUsagedRateThreshold = 0.8;
+
+/**
+ * SON GA Scheduler呼叫取得Worker Node名字
+ * 
+ * @param {String} namespace Pod Namespace
+ * @param {String} pod Pod Names
+ * 
+ * 若Worker Node已經準備就緒
+ * @returns {String} schedulerNode Worker Node Name
+ * 若Worker Node未準備就緒
+ * @returns {String} wait
+ */
 app.get('/scheduler/:namespace/:pod', (req, res) => {
-    let pod = req.params.pod;
+    // 取得namespace名稱
     let namespace = req.params.namespace;
+    // 取得pod名稱
+    let pod = req.params.pod;
+    // 取出已被安排的Deployment名稱列表
     let deploymentList = Object.keys(migrateScheduler);
-    let schedulerNode = '';
+    // 預計放置的VNF資訊
     let searchKey = `${namespace}:${pod}`
+    // 預計調度的Worker Node名稱
+    let schedulerNode = '';
+    // 取得Pod資訊函式庫
     const dataCollectionPod = new DataCollectionPod();
+    // 檢查預計遷移的Pod是否刪除完畢
     let deletePodStatusCheck = [];
     // 查詢Pod是否存在，若不存在代表Pod已刪除
     const getPodStatus = (namespace, pod, index) => {
@@ -86,25 +108,31 @@ app.get('/scheduler/:namespace/:pod', (req, res) => {
                 deletePodNameList.splice(index, 1);
             });
     }
+    // 依序檢查預計遷移的Pod是否刪除完畢
     for (let i = 0; i < deletePodNameList.length; i++) {
         deletePodStatusCheck.push(getPodStatus(deletePodNameList[i].namespace, deletePodNameList[i].pod, i));
     }
     // 判斷要遷移的Pod是否已成功刪除，並釋放資源
     Promise.all(deletePodStatusCheck)
-        .then((value) => {
+        .then(() => {
             console.log(colors.yellow(`正在刪除的Pod =>`));
             console.log(deletePodNameList);
+            // 檢查預計Scale Out的Worker Node是否開機完成
             if (!openNodeStatus) {
                 console.log(colors.yellow(`有Worker Node正在開機`));
             }
+            // 預計遷移的Pod已釋放資源且Scale Out Worker Node也皆開機完畢
             if (deletePodNameList.length == 0 && openNodeStatus) {
-                // if (deletePodNameList.length == 0) {
+                // 尋找Pod所屬於的Deployment
                 for (let i = 0; i < deploymentList.length; i++) {
+                    // 依照namespace及pod尋找符合的Deployment
                     if (searchKey.match(deploymentList[i])) {
+                        // 取出該Deployment副本Pod被安排到的Worker Node
                         schedulerNode = migrateScheduler[deploymentList[i]].shift();
                         break;
                     }
                 }
+                // 將該任務從處理中列表移除
                 for (let i = 0; i < inProcessTasks.length; i++) {
                     if (searchKey.match(inProcessTasks[i])) {
                         deleteInProcessTasks(inProcessTasks[i]);
@@ -128,23 +156,28 @@ const deleteInProcessTasks = (data) => {
         inProcessTasks.remove(data);
         console.log(colors.green(`目前inProcessTasks`));
         console.log(data);
-    },10000);
+    }, 10000);
 }
 
-// 工作節點飽和度讓Work Node CPU能力減1
-const workNodeSaturation = 1;
+/**
+ * 檢查叢集Node資源利用率是否滿足門檻值，若不滿足則進行叢集Node自動Scale In，每10秒執行一次
+ */
 async function nodeScaleIn() {
+    // 取得Node資訊函式庫
     const dataCollectionNode = new DataCollectionNode();
+    // 取得Pod資訊函式庫
     const dataCollectionPod = new DataCollectionPod();
-    let workNodeName = [];
-    let workNodeResource = [];
-    let placement = [[]];
     // 取得Node資訊
-    let req = await dataCollectionNode.getWorkNodeInfo(clusterControllerMaster);
-    workNodeName = req.workNodeName;
-    workNodeResource = req.workNodeResource;
+    let reqWorkNodeInfo = await dataCollectionNode.getWorkNodeInfo(clusterControllerMaster);
+    // Worker Node名稱
+    let workNodeName = [];
+    workNodeName = reqWorkNodeInfo.workNodeName;
+    // Worker Node可用資源
+    let workNodeResource = [];
+    workNodeResource = reqWorkNodeInfo.workNodeResource;
     // 取得初始化放置空間
-    placement = req.placement;
+    let placement = [[]];
+    placement = reqWorkNodeInfo.placement;
     // 將CPU總數減飽和度(workNodeSaturation)
     for (let i = 0; i < workNodeResource.length; i++) {
         workNodeResource[i][0] = strip(workNodeResource[i][0] - workNodeSaturation);
@@ -169,21 +202,28 @@ async function nodeScaleIn() {
         for (let pod = 0; pod < deploymentPodList.length; pod++) {
             let podName = deploymentPodList[pod].name;
             let podWorkNode = deploymentPodList[pod].node;
-            // 如果Pod未被調度
+            // 如果VNF未被調度
             if (!podWorkNode && !arrayFind(inProcessTasks, `${deploymentNamespace}:${deploymentName}`)) {
+                // 將該VNF名字加入pendingVnfNameList列表
                 pendingVnfNameList.push(podName);
+                // 將該VNF需求加入pendingVnfRequestList列表
                 pendingVnfRequestList.push([deploymentRequestCPU, deploymentRequestMemory]);
             } else {
+                // 如果VNF在Kubernetes Master
                 if (podWorkNode == clusterControllerMaster) {
                     console.log(`Pod ${podName} 在clusterControllerMaster(${clusterControllerMaster})中略過此Pod`);
                 } else if (arrayFind(inProcessTasks, `${deploymentNamespace}:${deploymentName}`)) {
+                    // 如果該VNF已經被處理過
                     console.log(colors.red(`${deploymentNamespace}:${deploymentName}等待被Binding`));
                 } else {
-                    // 建立放置位置陣列
+                    // 建立目前已放置VNF位置染色體
                     let vnfPosition = workNodeName.indexOf(podWorkNode);
                     if (vnfPosition != -1) {
+                        // 建立執行中的VNF名稱列表
                         vnfNameList.push(podName);
+                        // 建立執行中的VNF資源列表
                         vnfRequestList.push([deploymentRequestCPU, deploymentRequestMemory]);
+                        // 將VNF放入染色體對應位置
                         let vnfNum = vnfNameList.indexOf(podName) + 1;
                         placement[vnfPosition].push(vnfNum);
                     }
@@ -203,6 +243,7 @@ async function nodeScaleIn() {
         // 計算Worker Node是否欠載
         let maybeTurnOffNode = [];
         let resDataCollectionNode = dataCollectionNode.getAvailableResources(clusterControllerMaster, vnfRequestList);
+        // 依序檢查Worker Node資源使用率
         for (let i = 0; i < resDataCollectionNode.gaWorkNodeName.length; i++) {
             let cpuUsagedRate = 0;
             let memoryUsagedRate = 0;
@@ -211,10 +252,12 @@ async function nodeScaleIn() {
             let nodeNum = workNodeName.indexOf(nodeName);
             let nodeResourceCPU = workNodeResource[nodeNum][0];
             cpuUsagedRate = strip(strip(nodeResourceCPU - cpuAvailableResources) / nodeResourceCPU);
-            if (cpuUsagedRate < 0.8) {
+            if (cpuUsagedRate < vCpuUsagedRateThreshold) {
+                // 如果資源利用率節點為Kubernetes Master Node或主要Worker Node PASS
                 if (nodeName == clusterControllerMaster || nodeName == clusterMasterWorkNode) {
                     console.log(colors.green('資源利用率不足的節點為clusterControllerMaster或clusterMasterWorkNode不可關閉pass'));
                 } else {
+                    // 將vCPU利用率不足的Worker Node資訊加入可嘗試關閉的maybeTurnOffNode列表
                     let maybeTurnOffNodeUsagedRate = strip(cpuUsagedRate + memoryUsagedRate);
                     maybeTurnOffNode.push([nodeName, maybeTurnOffNodeUsagedRate]);
                 }
@@ -224,28 +267,29 @@ async function nodeScaleIn() {
         console.log(colors.red(`CPU資源利用率低於門檻節點：`));
         maybeTurnOffNode.sort(twoDimensionalArraySortBySecondElement)
         console.log(maybeTurnOffNode);
-        // 將欠載Node Pod進行遷移放置
+        // 將資源利用率不足的Worker Node Pod嘗試進行遷移放置
         if (maybeTurnOffNode.length != 0 && pendingVnfNameList.length == 0) {
-            // if (maybeTurnOffNode.length != 0) {
+            // 取出預計關閉的Worker Node
             let turnOffNodeName = maybeTurnOffNode[0][0];
             console.log(colors.red(`預計關閉節點${turnOffNodeName}`));
             console.log(colors.red(`Scale In機制觸發`));
-            let deploymentList = Object.keys(migrateScheduler);
+            // 預設Worker Node Scale In成功
             let scaleInStatus = true;
+            // 判斷是否有Pod即將被安排到該Worker Node上
+            let deploymentList = Object.keys(migrateScheduler);
             for (let i = 0; i < deploymentList.length; i++) {
-                console.log(deploymentList);
-                console.log(migrateScheduler);
-                console.log(turnOffNodeName);
                 let status = arrayFind(migrateScheduler[deploymentList[i]], turnOffNodeName);
                 if (status) {
+                    // 若有Pod即將放入該Worker Node則Scale In PASS
                     scaleInStatus = false;
                 }
             }
+            // 開始進行Kubernetes Scale In機制
             if (scaleInStatus) {
+                // 取得GA可用的Worker Node剩餘資源
+                let resDataCollectionNode = dataCollectionNode.getAvailableResources(clusterControllerMaster, vnfRequestList, turnOffNodeName);
                 let gaWorkNodeName = [];
                 let gaWorkNodeResource = [];
-                // 計算可用的Work Node剩餘資源
-                let resDataCollectionNode = dataCollectionNode.getAvailableResources(clusterControllerMaster, vnfRequestList, turnOffNodeName);
                 gaWorkNodeName = resDataCollectionNode.gaWorkNodeName;
                 gaWorkNodeResource = resDataCollectionNode.gaWorkNodeResource;
                 console.log(colors.red(`可用運算節點列表：`));
@@ -255,14 +299,17 @@ async function nodeScaleIn() {
                 // 準備要遷移的Pod資訊
                 let gaVnfName = [];
                 let gaVnfResource = [];
+                // 取得預計關閉的Worker Node編號
                 let maybeTurnOffNodeNum = workNodeName.indexOf(turnOffNodeName);
                 for (j = 0; j < placement[maybeTurnOffNodeNum].length; j++) {
+                    // 依序取出放置在預計關閉的Worker Node上方的Pod資訊
                     let podNum = placement[maybeTurnOffNodeNum][j];
                     gaVnfName.push(vnfNameList[podNum - 1]);
                     gaVnfResource.push(vnfRequestList[podNum - 1]);
                 }
                 console.log(colors.red(`預計遷移VNF列表：`));
                 console.log(gaVnfName);
+                // 開始執行GA演算法
                 let ga = new GA(initPopulationSize, clusterMasterWorkNode, gaWorkNodeName);
                 // 產生初始化基因池
                 let initPopulationResult = ga.copulation(gaWorkNodeResource, gaVnfName, gaVnfResource, twoDimensionalArrayCopy(placement), maybeTurnOffNodeNum);
@@ -272,11 +319,16 @@ async function nodeScaleIn() {
                     console.log(colors.green(`開始遷移Pod`));
                     // 遷移模組開始遷移Pod
                     const migrate = new Migrate(reqDeploymentList, gaWorkNodeName, gaVnfName, migrateScheduler, inProcessTasks, deletePodNameList);
+                    // 將Worker Node設為NoSchedule
                     await migrate.setNodeNoSchedule(turnOffNodeName);
+                    // 計算遷移成本
                     let migrationCost = migrate.migrationCost([], [], gaVnfName);
+                    // 預計遷移的VNF編號列表
                     let vnfNumList = migrationCost.vnfNum;
+                    // 安排VNF遷移
                     await migrate.setMigrateScheduler(initPopulationResult, vnfNumList, gaVnfName);
                     console.log(colors.green(`遷移安排完成`));
+                    // 刪除Worker Node
                     let shutDownNodeStatus = await deleteNode(turnOffNodeName, reqDeploymentList, vnfNumList, gaVnfName);
                     console.log(colors.red(`關閉${turnOffNodeName} 狀態：${shutDownNodeStatus}`));
                 } else {
@@ -288,7 +340,7 @@ async function nodeScaleIn() {
                     let gaVnfName = twoDimensionalArrayCopy(vnfNameList);
                     let gaVnfResource = twoDimensionalArrayCopy(vnfRequestList);
                     let ga = new GA(initPopulationSize, clusterMasterWorkNode, gaWorkNodeName);
-                    // 產生初始化基因池
+                    // 嘗試全局優化觀察是否有Worker Node可以被關閉
                     let initPopulationResult = ga.copulation(gaWorkNodeResource, gaVnfName, gaVnfResource, twoDimensionalArrayCopy(placement));
                     // 判斷執行中的Node數是否減少
                     if (initPopulationResult) {
@@ -311,7 +363,7 @@ async function nodeScaleIn() {
                             // 將染色體分數移除保留Worker Node基因
                             renew.shift();
                             const migrate = new Migrate(reqDeploymentList, gaWorkNodeName, gaVnfName, migrateScheduler, inProcessTasks, deletePodNameList);
-                            // 判斷是否有可關機節點
+                            // 取出可關機節點
                             let turnOffNode = []
                             for (let i = 0; i < renew.length; i++) {
                                 if (renew[i].length == 0) {
@@ -322,11 +374,12 @@ async function nodeScaleIn() {
                             let migrationCost = migrate.migrationCost(current, renew);
                             let vnfNumList = migrationCost.vnfNum;
                             console.log(colors.red(`預計遷移的VNF編號${vnfNumList}`));
-                            // 依照VNF編號安排其放置位置
+                            // 刪除預計遷移的VNF
                             let deleteVnfName = [];
                             for (let i = 0; i < vnfNumList.length; i++) {
                                 deleteVnfName.push(gaVnfName[vnfNumList[i] - 1]);
                             }
+                            // 依照VNF編號安排其放置位置
                             await migrate.setMigrateScheduler(initPopulationResult, vnfNumList, deleteVnfName);
                             console.log(colors.green(`遷移安排完成`));
                             for (let i = 0; i < turnOffNode.length; i++) {
@@ -356,6 +409,13 @@ async function nodeScaleIn() {
     await nodeScaleIn();
 }
 
+/**
+ * 刪除Worker Node
+ * @param {String} turnOffNode 預計刪除Worker Node名稱 
+ * @param {Array} reqDeploymentList 所有Deployment列表
+ * @param {Array} migrateVnfNumList 預計遷移的VNF編號列表
+ * @param {Array} vnfName 預計遷移VNF列表
+ */
 const deleteNode = async (turnOffNode, reqDeploymentList, migrateVnfNumList, vnfName) => {
     // 取出要遷移的Pod名稱
     let migratePodNameList = [];
@@ -363,6 +423,7 @@ const deleteNode = async (turnOffNode, reqDeploymentList, migrateVnfNumList, vnf
         let vnfNum = migrateVnfNumList[i];
         migratePodNameList.push(vnfName[vnfNum - 1]);
     }
+
     let migratePodCheckStatus = await migratePodCheck(reqDeploymentList, migratePodNameList);
     if (migratePodCheckStatus) {
         await autoScale.deleteNodeInCluster(turnOffNode);
@@ -377,12 +438,14 @@ const migratePodCheck = async (reqDeploymentList, migratePodNameList) => {
     // 取得要刪除的Pod屬於的Deployment資訊
     const dataCollectionPod = new DataCollectionPod();
     let deletePodNameList = [];
+    // 依序取得預計遷移的Pod資訊
     for (let i = 0; i < migratePodNameList.length; i++) {
         let podName = migratePodNameList[i];
         let podNameSpace = '';
         for (let j = 0; j < reqDeploymentList.length; j++) {
             let podList = reqDeploymentList[j].pod;
             for (let a = 0; a < podList.length; a++) {
+                // 依照Pod Name取得NameSpace
                 if (podList[a].name == podName) {
                     deploymentName = reqDeploymentList[j].name;
                     podNameSpace = reqDeploymentList[j].namespace;
@@ -410,13 +473,18 @@ const migratePodCheck = async (reqDeploymentList, migratePodNameList) => {
     }
     // 判斷要遷移的Pod是否已成功刪除，並釋放資源
     await Promise.all(deletePodStatusCheck);
+    // 等待500ms
     await timer.sleep(500);
+    // 如果預計遷移的Pod已全部刪除代表可開始關閉節點
     if (deletePodNameList.length == 0) {
         return true;
     } else {
+        // 繼續檢查預計遷移的Pod是否刪除完成
         return migratePodCheck(reqDeploymentList, migratePodNameList);
     }
 }
+
+// 10秒後啟動叢集Node自動Scale In機制檢查
 setTimeout(nodeScaleIn, 10000);
 
 async function scheduler() {
@@ -426,19 +494,16 @@ async function scheduler() {
     let workNodeName = [];
     let workNodeResource = [];
     let placement = [[]];
-    let req = await schedulerDataCollectionNode.getWorkNodeInfo(clusterControllerMaster);
-    workNodeName = req.workNodeName;
-    workNodeResource = req.workNodeResource;
+    // 取得Worker Node資訊
+    let reqWorkNodeInfo = await schedulerDataCollectionNode.getWorkNodeInfo(clusterControllerMaster);
+    workNodeName = reqWorkNodeInfo.workNodeName;
+    workNodeResource = reqWorkNodeInfo.workNodeResource;
     // 將CPU總數減飽和度(workNodeSaturation)
     for (let i = 0; i < workNodeResource.length; i++) {
         workNodeResource[i][0] = strip(workNodeResource[i][0] - workNodeSaturation);
     }
     // 取得初始化放置空間
-    placement = req.placement;
-    // 暫時關閉
-    // console.log(colors.red('Work Node資源'));
-    // console.log(workNodeName);
-    // console.log(workNodeResource);
+    placement = reqWorkNodeInfo.placement;
     // 取得所有Deployment列表
     let reqDeploymentList = await schedulerDataCollectionPod.getDeploymentList();
     let vnfNameList = [];
@@ -487,7 +552,7 @@ async function scheduler() {
     console.log(colors.red('運行中VNF'));
     console.log(vnfNameList);
     console.log(vnfRequestList);
-    console.log(colors.red('待處放置VNF'));
+    console.log(colors.red('待放置VNF'));
     console.log(pendingVnfNameList);
     console.log(pendingVnfRequestList);
     if (pendingVnfNameList.length > 0) {
@@ -497,11 +562,6 @@ async function scheduler() {
         let nodeAvailableResources = schedulerDataCollectionNode.getAvailableResources(clusterControllerMaster, vnfRequestList, deletingWorkerNode);
         gaWorkNodeName = nodeAvailableResources.gaWorkNodeName;
         gaWorkNodeResource = nodeAvailableResources.gaWorkNodeResource;
-        // 暫時關閉
-        // console.log(colors.red(`可用運算節點列表：`));
-        // console.log(gaWorkNodeName);
-        // console.log(colors.red(`可用運算節點資源列表：`));
-        // console.log(gaWorkNodeResource);
         // 產生初始化基因池
         let ga = new GA(initPopulationSize, clusterMasterWorkNode, gaWorkNodeName);
         let initPopulationResult = ga.copulation(gaWorkNodeResource, pendingVnfNameList, pendingVnfRequestList, twoDimensionalArrayCopy(placement));
@@ -509,11 +569,13 @@ async function scheduler() {
             // 一般scheduler 
             console.log(colors.red('新的VNF調度成功'));
             const migrate = new Migrate(reqDeploymentList, gaWorkNodeName, pendingVnfNameList, migrateScheduler, inProcessTasks, deletePodNameList);
+            // 遷移成本
             let migrationCost = migrate.migrationCost([], [], pendingVnfNameList);
             let vnfNumList = migrationCost.vnfNum;
             await migrate.setMigrateScheduler(initPopulationResult, vnfNumList);
         } else {
             // 全局優化放置
+            // 運行中的VNF加上待放置VNF資訊
             let allvnfNameList = vnfNameList.concat(pendingVnfNameList);
             let allVnfRequestList = vnfRequestList.concat(pendingVnfRequestList);
             initPopulationResult = ga.copulation(workNodeResource, allvnfNameList, allVnfRequestList, twoDimensionalArrayCopy(placement));
@@ -524,20 +586,25 @@ async function scheduler() {
                 let newPlacement = twoDimensionalArrayCopy(initPopulationResult[0]);
                 // 僅保留染色體中Worker Node基因
                 newPlacement.shift();
+                // 遷移成本
                 const migrate = new Migrate(reqDeploymentList, workNodeName, allvnfNameList, migrateScheduler, inProcessTasks, deletePodNameList);
                 let migrationCost = migrate.migrationCost(currentPlacement, newPlacement, pendingVnfNameList);
                 let vnfNumList = migrationCost.vnfNum;
                 console.log(colors.red(`預計遷移的VNF編號`));
                 console.log(vnfNumList);
+                // 建立要刪除的VNF名稱
                 let deleteVnfName = [];
                 for (let i = 0; i < vnfNumList.length; i++) {
                     deleteVnfName.push(gaVnfName[vnfNumList[i] - 1]);
                 }
+                // 設定遷移資訊
                 await migrate.setMigrateScheduler(initPopulationResult, vnfNumList, deleteVnfName);
             } else {
-                // 經過全局優化後人然無法順利放置，序進行Worker Scale Out
+                // 經過全局優化後任然無法順利放置，依序進行Worker Scale Out
                 console.log(colors.red(`資源不足需擴展叢集`));
+                // 取得叢集中已經Ready的節點
                 let nowNodeNameList = await schedulerDataCollectionNode.getReadyNodeList();
+                // 取出關機中的節點資訊
                 let powerOffNodeNameList = arrayFilter(clusterWorkNodeList, nowNodeNameList);
                 // 建立關機中的Worker Node資源列表
                 let powerOffNodeResource = [];
@@ -560,7 +627,7 @@ async function scheduler() {
                 let gaVnfResource = twoDimensionalArrayCopy(vnfRequestList);
                 gaVnfResource = gaVnfResource.concat(pendingVnfRequestList);
                 let ga = new GA(initPopulationSize, clusterMasterWorkNode, gaWorkNodeName);
-                // 產生初始化基因池
+                // 進行放置決策
                 let initPopulationResult = ga.copulation(gaWorkNodeResource, gaVnfName, gaVnfResource, twoDimensionalArrayCopy(placement));
                 // 經過Worker Node Scale Out後可成功放入該VNF
                 if (initPopulationResult) {
@@ -568,7 +635,7 @@ async function scheduler() {
                     // 建立準備開啟的Worker Node列表
                     let preparationNodeList = [];
                     for (let i = 1; i <= gaWorkNodeName.length; i++) {
-                        if (initPopulationResult[0][i].length != 0) {
+                        if (initPopulationResult[0][i].length != 0 && !arrayFind(workNodeName, gaWorkNodeName[i - 1])) {
                             let node = gaWorkNodeName[i - 1];
                             if (node != clusterMasterWorkNode) {
                                 preparationNodeList.push(openNode(node));
